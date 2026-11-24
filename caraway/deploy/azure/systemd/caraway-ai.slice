@@ -1,0 +1,12 @@
+# Separate, capped slice for local inference so a model can never starve RileyAI.
+[Unit]
+Description=Caraway local AI (Ollama), capped
+Before=slices.target
+
+[Slice]
+CPUWeight=10
+CPUQuota=@OLLAMA_CPU_QUOTA@
+MemoryHigh=@OLLAMA_MEM_HIGH@
+MemoryMax=@OLLAMA_MEM_MAX@
+TasksMax=128
+IOWeight=10

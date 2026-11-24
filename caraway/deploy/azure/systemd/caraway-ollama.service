@@ -1,0 +1,29 @@
+[Unit]
+Description=Ollama for Caraway (private instance on 127.0.0.1:11435, capped)
+After=network-online.target
+
+[Service]
+Type=simple
+User=caraway-ollama
+Group=caraway-ollama
+Slice=caraway-ai.slice
+Environment=OLLAMA_HOST=127.0.0.1:11435 OLLAMA_MODELS=@OLLAMA_DIR@/models OLLAMA_KEEP_ALIVE=60s OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NOPRUNE=1 HOME=@OLLAMA_DIR@
+ExecStart=@OLLAMA_DIR@/bin/ollama serve
+Restart=always
+RestartSec=10
+Nice=15
+IOSchedulingClass=idle
+ReadWritePaths=@OLLAMA_DIR@
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -33,7 +33,7 @@ def _check_host(url: str) -> str:
     host = (parsed.hostname or "").lower()
     if host not in config.ALLOWED_HOSTS:
         raise HostNotAllowed(f"host not on allowlist: {host}")
-    if parsed.scheme != "https" and host not in ("127.0.0.1", "localhost"):
+    if parsed.scheme != "https" and host not in ("127.0.0.1", "localhost", "ollama", "caraway-ollama"):
         raise HostNotAllowed(f"refusing non-https url for {host}")
     return host
 

@@ -18,6 +18,19 @@ STALE_HOURS = 9  # scans run every 4h; two missed runs = stale
 
 
 def launchd_status() -> dict:
+    """Scheduler status: launchd on macOS, systemd units on Linux, nothing inside a container
+    (the container runtime's restart policy and healthcheck cover it)."""
+    import os
+    if os.environ.get("CARAWAY_IN_CONTAINER") == "1":
+        return {"platform": "container", "checked": False}
+    if sys.platform.startswith("linux") and shutil.which("systemctl"):
+        out = {}
+        for unit in ("caraway-scan.timer", "caraway-dashboard.service", "caraway-backup.timer"):
+            r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
+            installed = subprocess.run(["systemctl", "cat", unit], capture_output=True, text=True).returncode == 0
+            if installed:
+                out[unit] = {"loaded": r.stdout.strip() == "active", "state": r.stdout.strip()}
+        return out or {"platform": "linux", "checked": False}
     if sys.platform != "darwin":
         return {"platform": sys.platform, "checked": False}
     out = {}
@@ -52,7 +65,10 @@ def check(conn) -> dict:
     ld = launchd_status()
     for label, st in ld.items():
         if isinstance(st, dict) and st.get("loaded") is False:
-            problems.append(f"{label} is not loaded (run scripts/install_macos.sh)")
+            problems.append(f"{label} is not active" + (" (run scripts/install_macos.sh)" if label.startswith("com.") else ""))
+    last_backup = db.control(conn, "last_backup_at")
+    if last_ok and (not last_backup or datetime.fromisoformat(last_backup) < now - timedelta(hours=36)):
+        problems.append(f"no database backup in the last 36h (last: {last_backup or 'never'})")
     report = {"checked_at": db.now(), "ok": not problems, "problems": problems,
               "last_successful_scan": last_ok and last_ok["finished_at"], "launchd": ld, "disk_free_gb": round(free_gb, 1)}
     config.ensure_dirs()
@@ -66,9 +82,20 @@ def check(conn) -> dict:
 
 
 def notify(conn, problems: list) -> None:
-    key = "notified:" + datetime.now().strftime("%Y-%m-%d") + ":" + str(abs(hash(tuple(sorted(problems)))) % 10**8)
-    if db.control(conn, key) == "1" or sys.platform != "darwin":
+    """At most one alert per distinct problem set per day: macOS notification and/or webhook."""
+    import hashlib
+    digest = hashlib.sha256("|".join(sorted(problems)).encode()).hexdigest()[:12]
+    key = "notified:" + datetime.now().strftime("%Y-%m-%d") + ":" + digest
+    if db.control(conn, key) == "1":
         return
-    msg = (problems[0][:180] + (f" (+{len(problems) - 1} more)" if len(problems) > 1 else "")).replace('"', "'")
-    subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "Caraway needs attention"'], capture_output=True)
+    msg = problems[0][:180] + (f" (+{len(problems) - 1} more)" if len(problems) > 1 else "")
+    if sys.platform == "darwin":
+        subprocess.run(["osascript", "-e", f'display notification "{msg.replace(chr(34), chr(39))}" with title "Caraway needs attention"'],
+                       capture_output=True)
+    if config.ALERT_WEBHOOK:
+        from . import net
+        try:
+            net.post_json(config.ALERT_WEBHOOK, {"text": "Caraway needs attention: " + "; ".join(problems)[:1500]}, retries=1)
+        except Exception as e:  # noqa: BLE001 - alerting must never break the scan
+            db.log_error(conn, "health:webhook", str(e))
     db.set_control(conn, key, "1")

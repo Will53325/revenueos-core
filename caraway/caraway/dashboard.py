@@ -257,10 +257,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _authorized(self) -> bool:
+        if not config.DASHBOARD_TOKEN:
+            return True
+        cookie = self.headers.get("Cookie") or ""
+        given = dict(p.strip().split("=", 1) for p in cookie.split(";") if "=" in p).get("caraway_token", "")
+        auth = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        return secrets.compare_digest(given, config.DASHBOARD_TOKEN) or secrets.compare_digest(auth, config.DASHBOARD_TOKEN)
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/health":
             return self._send(200, "ok", "text/plain")
+        if u.path == "/login":
+            tok = urllib.parse.parse_qs(u.query).get("token", [""])[0]
+            if config.DASHBOARD_TOKEN and secrets.compare_digest(tok, config.DASHBOARD_TOKEN):
+                self.send_response(303)
+                self.send_header("Set-Cookie", f"caraway_token={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+            return self._send(403, "invalid token", "text/plain")
+        if not self._authorized():
+            return self._send(401, "Caraway dashboard: open /login?token=<CARAWAY_DASHBOARD_TOKEN>", "text/plain")
         if u.path == "/api/status":
             conn = db.connect(); db.init(conn)
             try:
@@ -273,6 +292,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, render(params.get("tab", ["overview"])[0], params))
 
     def do_POST(self):
+        if not self._authorized():
+            return self._send(401, "unauthorized", "text/plain")
         n = min(int(self.headers.get("Content-Length") or 0), 10000)
         data = urllib.parse.parse_qs(self.rfile.read(n).decode())
         if data.get("token", [""])[0] != TOKEN:

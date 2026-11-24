@@ -57,19 +57,36 @@ class DryRunTransport:
 
 # ---------------------------------------------------------------- Gmail
 
+def _secret_file(account: str):
+    return config.SECRETS_DIR / f"gmail-{account}.json"
+
+
 def keychain_get(account: str) -> Optional[str]:
-    if sys.platform != "darwin":
+    """macOS Keychain, or on Linux servers a mode-600 file in CARAWAY_SECRETS_DIR."""
+    if sys.platform == "darwin":
+        r = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
+                           capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else None
+    f = _secret_file(account)
+    if not f.exists():
         return None
-    r = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
-                       capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else None
+    if f.stat().st_mode & 0o077:
+        raise PermissionError(f"{f} must be readable only by its owner (chmod 600)")
+    return f.read_text().strip()
 
 
 def keychain_set(account: str, secret: str) -> None:
-    if sys.platform != "darwin":
-        raise RuntimeError("Keychain storage requires macOS")
-    subprocess.run(["security", "add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", secret],
-                   check=True, capture_output=True)
+    if sys.platform == "darwin":
+        subprocess.run(["security", "add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", secret],
+                       check=True, capture_output=True)
+        return
+    import os
+    config.SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(config.SECRETS_DIR, 0o700)
+    f = _secret_file(account)
+    fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(secret)
 
 
 class GmailTransport:

@@ -1,0 +1,41 @@
+[Unit]
+Description=Caraway dashboard (localhost only; reach it through an SSH tunnel or Tailscale)
+After=network-online.target
+
+[Service]
+Type=simple
+User=caraway
+Group=caraway
+Slice=caraway.slice
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@SECRETS_DIR@/caraway.env
+Environment=CARAWAY_HOME=@DATA_DIR@ CARAWAY_SECRETS_DIR=@SECRETS_DIR@ CARAWAY_HOST=@DASHBOARD_BIND@ CARAWAY_PORT=8787 PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m caraway serve
+Restart=always
+RestartSec=5
+Nice=10
+ReadWritePaths=@DATA_DIR@
+ReadOnlyPaths=@SECRETS_DIR@ @APP_DIR@
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

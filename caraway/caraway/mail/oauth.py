@@ -4,7 +4,8 @@ The owner creates an OAuth client of type "Desktop app" in their own Google
 Cloud project, downloads client_secret.json, then runs:
     python3 -m caraway mail connect --client-secret ~/Downloads/client_secret.json
 A browser opens on Google's consent screen; the refresh token is stored in
-the macOS Keychain (service 'caraway-gmail'). Nothing is stored in the repo.
+the macOS Keychain (service 'caraway-gmail'), or on Linux in CARAWAY_SECRETS_DIR/gmail-oauth.json
+(mode 600). Nothing is stored in the repo.
 Connecting does not enable sending; that still needs the policy and control.
 """
 from __future__ import annotations
@@ -22,7 +23,9 @@ SCOPES = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 
 
-def connect(client_secret_path: str) -> str:
+def connect(client_secret_path: str, port: int = 0, open_browser: bool = True) -> str:
+    """On a headless server: `mail connect --client-secret F --port 8788 --no-browser`, then from your
+    laptop `ssh -L 8788:127.0.0.1:8788 <vm>` and open the printed URL in your laptop's browser."""
     cfg = json.load(open(client_secret_path))
     c = cfg.get("installed") or cfg.get("web") or {}
     state = secrets.token_urlsafe(16)
@@ -38,13 +41,14 @@ def connect(client_secret_path: str) -> str:
             self.send_response(200); self.end_headers()
             self.wfile.write(b"Caraway: Gmail authorization received. You can close this tab.")
 
-    srv = HTTPServer(("127.0.0.1", 0), H)
+    srv = HTTPServer(("127.0.0.1", port), H)
     redirect = f"http://127.0.0.1:{srv.server_port}"
     url = AUTH_URL + "?" + urllib.parse.urlencode({
         "client_id": c["client_id"], "redirect_uri": redirect, "response_type": "code", "scope": SCOPES,
         "access_type": "offline", "prompt": "consent", "state": state})
-    print("Opening Google's consent page. If it doesn't open, visit:\n" + url)
-    webbrowser.open(url)
+    print("Open Google's consent page" + ("" if open_browser else " in your laptop browser (SSH tunnel to this port)") + ":\n" + url)
+    if open_browser:
+        webbrowser.open(url)
     srv.handle_request()
     if result.get("state") != state or "code" not in result:
         raise RuntimeError(f"authorization failed: {result.get('error', 'state mismatch')}")

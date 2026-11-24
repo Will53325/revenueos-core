@@ -85,8 +85,16 @@ def validate(raw: str) -> Optional[dict]:
     return {"summary": summary.strip()[:600], "category": cat}
 
 
+def in_window(hour: int, window: str) -> bool:
+    if not window:
+        return True
+    a, b = (int(x) for x in window.split("-"))
+    return a <= hour < b if a < b else (hour >= a or hour < b)
+
+
 def get_provider() -> Provider:
-    if config.LLM_PROVIDER == "none":
+    from datetime import datetime
+    if config.LLM_PROVIDER == "none" or not in_window(datetime.now().hour, config.LLM_WINDOW):
         return NullProvider()
     p = OllamaProvider()
     return p if p.available() else NullProvider()

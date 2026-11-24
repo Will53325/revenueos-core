@@ -1,0 +1,13 @@
+# Resource ceiling for everything Caraway runs (scanner, dashboard, backups).
+# Lower CPUWeight than the default 100 means RileyAI wins whenever the CPU is contended.
+[Unit]
+Description=Caraway (resource-capped, lower priority than RileyAI)
+Before=slices.target
+
+[Slice]
+CPUWeight=20
+CPUQuota=@CARAWAY_CPU_QUOTA@
+MemoryHigh=@CARAWAY_MEM_HIGH@
+MemoryMax=@CARAWAY_MEM_MAX@
+TasksMax=256
+IOWeight=20

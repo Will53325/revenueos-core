@@ -28,6 +28,19 @@ SAM_API_KEY_ENV = "CARAWAY_SAM_API_KEY"
 OLLAMA_URL = os.environ.get("CARAWAY_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("CARAWAY_OLLAMA_MODEL", "qwen2.5:3b")
 LLM_PROVIDER = os.environ.get("CARAWAY_LLM", "auto")  # auto | ollama | none
+# Local hours when inference may run, e.g. "1-6" (01:00-05:59). Keeps CPU-heavy work away from
+# a co-located production app's busy hours. Empty = any time.
+LLM_WINDOW = os.environ.get("CARAWAY_LLM_WINDOW", "")
+
+# Dashboard access token. When set, every request needs it (cookie after /login?token=...).
+DASHBOARD_TOKEN = os.environ.get("CARAWAY_DASHBOARD_TOKEN", "")
+
+# Secrets directory for servers without a macOS Keychain (files must be mode 600).
+SECRETS_DIR = Path(os.environ.get("CARAWAY_SECRETS_DIR", HOME / "secrets"))
+# Optional: Azure Blob SAS URL of a backup container (write-only SAS), and an alert webhook.
+BACKUP_SAS_URL = os.environ.get("CARAWAY_BACKUP_SAS_URL", "")
+ALERT_WEBHOOK = os.environ.get("CARAWAY_ALERT_WEBHOOK", "")
+BACKUP_KEEP_DAYS = int(os.environ.get("CARAWAY_BACKUP_KEEP_DAYS", "14"))
 
 # Only these hosts may be contacted. Anything else is refused in code.
 ALLOWED_HOSTS = {
@@ -85,6 +98,23 @@ HEAVY_SCOPE_TERMS = ["construction", "reconstruction", "renovation", "rehabilita
                      "paving", "excavation", "software", "information system", "fiber-optic",
                      "fiber optic", "network", "seismic", "calibration", "licensing and maintenance",
                      "professional", "technical services", "design build", "design-build", "well maintenance"]
+
+
+def _allow_configured_hosts() -> None:
+    """Hosts the owner configured explicitly (backup storage, alert webhook) join the allowlist."""
+    from urllib.parse import urlparse
+    for url in (BACKUP_SAS_URL, ALERT_WEBHOOK):
+        host = (urlparse(url).hostname or "").lower() if url else ""
+        if host and (host.endswith(".blob.core.windows.net") or host in ("hooks.slack.com", "ntfy.sh")
+                     or host.endswith(".webhook.office.com")):
+            ALLOWED_HOSTS.setdefault(host, 1.0)
+    ollama = (urlparse(OLLAMA_URL).hostname or "").lower()
+    if ollama in ("ollama", "caraway-ollama"):  # container service name on Caraway's private network
+        ALLOWED_HOSTS.setdefault(ollama, 0.0)
+
+
+_allow_configured_hosts()
+
 # Agency-assigned categories that are never Caraway's initial market.
 EXCLUDED_NOTICE_CATEGORIES = ["human services/client services"]  # exact match, lowercase
 

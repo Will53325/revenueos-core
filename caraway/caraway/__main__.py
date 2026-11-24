@@ -14,7 +14,8 @@ Email (nothing is sent until you enable it)
   mail connect --client-secret PATH   authorize Gmail (macOS Keychain)
   mail import FOLDER                  ingest replies exported as .eml files
 Operations
-  serve | doctor | pause | resume | evaluate
+  serve | daemon | doctor | pause | resume | evaluate
+  backup [run] | backup restore FILE.db.gz   (restore writes caraway.db.restored, never in place)
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("scan"); s.add_argument("--no-intel", action="store_true"); s.add_argument("--source", action="append")
     s.add_argument("--trigger", default="manual")
-    for name in ("serve", "status", "pause", "resume", "report", "evaluate", "doctor"):
+    for name in ("serve", "status", "pause", "resume", "report", "evaluate", "doctor", "daemon"):
         sub.add_parser(name)
     lp = sub.add_parser("leads"); lp.add_argument("-n", type=int, default=15)
     op = sub.add_parser("outcome"); op.add_argument("opportunity_id", type=int)
@@ -53,8 +54,11 @@ def main(argv=None) -> int:
     qp.add_argument("--opportunity", type=int, required=True); qp.add_argument("--contractor", type=int, required=True)
     qp.add_argument("--amount", type=float, required=True); qp.add_argument("--period", default="year")
     qp.add_argument("--evidence", required=True); qp.add_argument("--verified", action="store_true")
+    bk = sub.add_parser("backup"); bk.add_argument("action", nargs="?", default="run", choices=["run", "restore"])
+    bk.add_argument("file", nargs="?")
     mp = sub.add_parser("mail"); mp.add_argument("action", choices=["status", "drafts", "approve", "enable", "disable", "connect", "import"])
     mp.add_argument("args", nargs="*"); mp.add_argument("--client-secret")
+    mp.add_argument("--port", type=int, default=0); mp.add_argument("--no-browser", action="store_true")
     a = ap.parse_args(argv)
     _logging()
     log = logging.getLogger("caraway")
@@ -70,6 +74,10 @@ def main(argv=None) -> int:
     if a.cmd == "serve":
         from . import dashboard
         dashboard.serve()
+        return 0
+    if a.cmd == "daemon":
+        from . import daemon
+        daemon.run()
         return 0
     conn = db.connect(); db.init(conn)
     out = None
@@ -98,6 +106,9 @@ def main(argv=None) -> int:
             conn.execute("""INSERT INTO financial_facts(fact_type,basis,amount,as_of,opportunity_id,source,evidence,verified,created_at)
                             VALUES('awarded_value','actual',?,?,?,'owner',?,1,?)""", (a.value, db.now(), a.opportunity_id, a.evidence, db.now()))
         db.audit(conn, "owner", "record_outcome", str(a.opportunity_id), a.outcome, a.evidence); out = "recorded"
+    elif a.cmd == "backup":
+        from . import backup
+        out = backup.run(conn) if a.action == "run" else {"restored_to": str(backup.restore(a.file))}
     elif a.cmd == "brain":
         from . import brain
         out = {"cycle": lambda: brain.cycle(conn), "plan": lambda: brain.plan(conn), "funnel": lambda: brain.funnel_report(conn)}[a.action]()
@@ -139,7 +150,7 @@ def main(argv=None) -> int:
             db.audit(conn, "owner", f"email_{a.action}", "", "SET"); out = f"email sending {a.action}d by owner"
         elif a.action == "connect":
             from .mail import oauth
-            out = oauth.connect(a.client_secret)
+            out = oauth.connect(a.client_secret, port=a.port, open_browser=not a.no_browser)
         elif a.action == "import":
             out = engine.import_eml_dir(conn, a.args[0])
     if out is not None:
