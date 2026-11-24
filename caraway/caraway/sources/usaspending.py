@@ -23,13 +23,16 @@ AWARD_URL = "https://www.usaspending.gov/award/{gid}"
 SMALL_AWARD_MAX = 1_000_000
 
 
-def _search(naics: str, start: str, end: str, pages: int = 2, sort: str = "Award Amount") -> list:
+def _search(naics: str, start: str, end: str, pages: int = 2, sort: str = "Award Amount",
+            amounts: list = None) -> list:
     out = []
+    filters = {"award_type_codes": ["A", "B", "C", "D"], "naics_codes": {"require": [naics]},
+               "time_period": [{"start_date": start, "end_date": end}]}
+    if amounts:
+        filters["award_amounts"] = amounts
     for page in range(1, pages + 1):
         data = net.post_json(ENDPOINT, {
-            "filters": {"award_type_codes": ["A", "B", "C", "D"],
-                        "naics_codes": {"require": [naics]},
-                        "time_period": [{"start_date": start, "end_date": end}]},
+            "filters": filters,
             "fields": FIELDS, "limit": 100, "page": page, "sort": sort, "order": "desc"})
         out.extend(data.get("results") or [])
         if not (data.get("page_metadata") or {}).get("hasNext"):
@@ -42,7 +45,11 @@ def sync(conn) -> dict:
     start = (today - timedelta(days=365 * 2)).isoformat()
     stats = {"awards": 0, "forecasts": 0, "contractors": 0}
     for naics, cat in sorted(config.TARGET_NAICS.items()):
-        for r in _search(naics, start, today.isoformat()):
+        rows = _search(naics, start, today.isoformat())
+        # Second pass: the small contracts a new prime could realistically manage.
+        rows += _search(naics, start, today.isoformat(), pages=3,
+                        amounts=[{"lower_bound": 25000, "upper_bound": SMALL_AWARD_MAX}])
+        for r in rows:
             gid = r.get("generated_internal_id")
             amount = r.get("Award Amount") or 0
             url = AWARD_URL.format(gid=gid) if gid else None
