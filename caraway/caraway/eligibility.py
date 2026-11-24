@@ -107,6 +107,11 @@ def assess(opp: dict, req: dict, profile: dict, now: Optional[datetime] = None) 
         reasons.append("Title indicates a purchase of materials/supplies, not a service contract "
                        "(goods resale is outside the initial model).")
 
+    ncat = (opp.get("category") or "").lower()
+    if ncat.startswith("construction") and not reasons:
+        blockers.append(f"Agency files this under '{opp.get('category')}': expect bonding, prevailing wage "
+                        "and contractor licensing requirements. Confirm in the solicitation.")
+
     # 5. Set-asides and certifications.
     conds = " | ".join(req.get("eligibility_conditions") or []) + " | " + (opp.get("set_aside") or "")
     cl = conds.lower()

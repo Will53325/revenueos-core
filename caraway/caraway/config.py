@@ -34,6 +34,9 @@ ALLOWED_HOSTS = {
     "api.sam.gov": 2.0,               # seconds between requests
     "api.usaspending.gov": 1.0,
     "data.cityofnewyork.us": 1.0,
+    "data.lacity.org": 1.0,
+    "data.montgomerycountymd.gov": 1.0,
+    "data.delaware.gov": 1.0,
     "127.0.0.1": 0.0,                 # local Ollama only
     "localhost": 0.0,
 }
@@ -45,10 +48,12 @@ USER_AGENT = "CarawayScanner/0.1 (public procurement research; contact via owner
 TARGET_CATEGORIES = {
     "janitorial": ["janitorial", "custodial", "cleaning services", "housekeeping",
                    "office cleaning", "floor care", "carpet cleaning", "window cleaning",
-                   "window washing", "pressure washing", "power washing"],
+                   "window washing", "pressure washing", "power washing", "street sweeping",
+                   "sweeping services", "cleanout", "ancillary services"],
     "landscaping": ["landscap", "grounds maintenance", "groundskeeping", "lawn", "mowing",
                     "tree planting", "tree trimming", "tree pruning", "turf", "weed",
-                    "snow removal", "snow plowing", "irrigation maintenance"],
+                    "snow removal", "snow plowing", "irrigation maintenance", "vegetated",
+                    "vegetation management", "green roof", "planting"],
     "facility_maintenance": ["facility maintenance", "facilities maintenance",
                              "building maintenance", "maintenance services", "handyman",
                              "painting services", "minor repair", "preventive maintenance"],
@@ -71,7 +76,9 @@ HEAVY_SCOPE_TERMS = ["construction", "reconstruction", "renovation", "rehabilita
                      "scaffold", "substation", "mep ", "general construction", "generator",
                      "emergency back", "fire alarm", "fire suppression", "sprinkler", "plumbing",
                      "electrical", "cooling tower", "installation of", "green infrastructure",
-                     "paving", "excavation"]
+                     "paving", "excavation", "software", "information system", "fiber-optic",
+                     "fiber optic", "network", "seismic", "calibration", "licensing and maintenance",
+                     "professional", "technical services", "design build", "design-build", "well maintenance"]
 # Agency-assigned categories that are never Caraway's initial market.
 EXCLUDED_NOTICE_CATEGORIES = ["human services/client services"]  # exact match, lowercase
 
