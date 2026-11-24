@@ -136,6 +136,13 @@ def assess(opp: dict, req: dict, profile: dict, now: Optional[datetime] = None) 
         blockers.append("Active SAM.gov entity registration (UEI) not verified.")
     if opp.get("source") == "nyc_city_record" and regs.get("nyc_passport_vendor_account") != "verified":
         blockers.append("NYC PASSPort vendor account not verified (needed to view documents and respond).")
+    elif opp.get("source") not in ("sam_gov", "nyc_city_record"):
+        state_regs = regs.get("state_vendor_registrations") or {}
+        if state_regs.get(opp.get("source")) != "verified":
+            blockers.append(f"Vendor registration with this government's procurement portal ({opp.get('source')}) "
+                            "not verified; most require it before documents can be downloaded or a response submitted.")
+    if opp.get("state") and (profile.get("home_base") or {}).get("state") is None:
+        blockers.append(f"Work is in {opp.get('state')}; Caraway's home base and subcontractor coverage there are unknown.")
 
     # 7. Money, bonding, insurance.
     if req.get("bonding_requirements", "unknown") != "unknown":

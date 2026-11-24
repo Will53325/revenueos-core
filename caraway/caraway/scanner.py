@@ -7,6 +7,7 @@ independently (one broken source never stops the others).
 from __future__ import annotations
 
 import fcntl
+import time as _time
 import json
 import logging
 import traceback
@@ -203,6 +204,13 @@ def process_queue(conn, profile: dict, stats: dict) -> None:
             return
         job = db.one(conn, "SELECT * FROM jobs WHERE status='queued' AND next_run_at<=? ORDER BY id LIMIT 1", (db.now(),))
         if not job:
+            # Retries scheduled a few seconds out belong to this run: wait for them (bounded).
+            pending = db.one(conn, "SELECT MIN(next_run_at) t FROM jobs WHERE status='queued'")
+            if pending and pending["t"]:
+                wait = (datetime.fromisoformat(pending["t"]) - datetime.now(timezone.utc)).total_seconds()
+                if wait <= 90:
+                    _time.sleep(max(0.5, wait))
+                    continue
             return
         conn.execute("UPDATE jobs SET status='running', attempts=attempts+1, updated_at=? WHERE id=?", (db.now(), job["id"]))
         try:
@@ -225,8 +233,7 @@ def process_queue(conn, profile: dict, stats: dict) -> None:
                 retry_at = (datetime.now(timezone.utc) + timedelta(seconds=20 * attempts)).replace(microsecond=0).isoformat()
                 conn.execute("UPDATE jobs SET status='queued', last_error=?, next_run_at=?, updated_at=? WHERE id=?",
                              (str(e)[:500], retry_at, db.now(), job["id"]))
-                import time as _t
-                _t.sleep(min(20 * attempts, 60))
+
 
 
 def run_scan(trigger: str = "manual", conn=None, sources: Optional[list] = None, intel: bool = True) -> dict:
@@ -263,6 +270,8 @@ def run_scan(trigger: str = "manual", conn=None, sources: Optional[list] = None,
         process_queue(conn, profile, stats)
         failed = stats.get("failed_jobs")
         got_any = any(v.get("fetched") for v in stats.get("sources", {}).values())
+        if not failed and db.one(conn, "SELECT COUNT(*) n FROM jobs WHERE scan_run_id=? AND status NOT IN ('done','denied')", (run_id,))["n"]:
+            failed = stats["failed_jobs"] = ["jobs left unfinished"]
         status = "ok" if not failed else ("partial" if got_any else "failed")
         conn.execute("UPDATE scan_runs SET finished_at=?, status=?, stats_json=? WHERE id=?",
                      (db.now(), status, db.dumps(stats), run_id))
