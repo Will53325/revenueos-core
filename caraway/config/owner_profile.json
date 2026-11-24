@@ -1,0 +1,31 @@
+{
+  "_comment": "Owner capability profile. Every value starts UNVERIFIED. Copy to owner_profile.local.json (gitignored) and change a value to \"verified\" only with evidence on file. Eligibility fails closed on anything unverified.",
+  "company_name": "Caraway Housing LLC",
+  "home_base": {"city": null, "state": null, "max_travel_miles": null},
+  "registrations": {
+    "sam_gov_active": "unverified",
+    "uei": null,
+    "cage_code": null,
+    "nyc_passport_vendor_account": "unverified",
+    "state_vendor_registrations": {}
+  },
+  "certifications": {
+    "sdvosb": "unverified",
+    "vosb": "unverified",
+    "small_business": "unverified",
+    "8a": "not_held",
+    "hubzone": "not_held",
+    "wosb": "not_held",
+    "nyc_mwbe": "not_held"
+  },
+  "insurance": {"general_liability": "unverified", "workers_comp": "unverified", "auto": "unverified"},
+  "bonding": {"bid_bond_capacity_usd": null, "performance_bond_capacity_usd": null, "status": "unverified"},
+  "licenses": [],
+  "past_performance": [],
+  "finance": {"business_bank_account": "not_established", "available_working_capital_usd": null, "reserve_floor_usd": null},
+  "pursuit_limits": {
+    "min_days_to_deadline": 7,
+    "max_contract_value_usd": 500000,
+    "max_upfront_cost_usd": 0
+  }
+}
