@@ -5,7 +5,7 @@ Each opportunity source exposes NAME, DESCRIPTION, REQUIRES_KEY and
 Intelligence sources expose `sync(conn)` and write their own tables.
 Adapters only read public data; none of them can submit anything.
 """
-from . import nyc_city_record, sam_gov, socrata_bids, usaspending
+from . import forecasts, nyc_city_record, sam_gov, socrata_bids, usaspending
 
 OPPORTUNITY_SOURCES = {
     "nyc_city_record": nyc_city_record,
@@ -14,4 +14,5 @@ OPPORTUNITY_SOURCES = {
 }
 INTEL_SOURCES = {
     "usaspending": usaspending,
+    "forecasts": forecasts,
 }

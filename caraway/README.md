@@ -37,17 +37,97 @@ Remove with `./scripts/uninstall_macos.sh` (keeps data).
 ## Commands
 
 ```bash
-python3 -m caraway scan              # manual Run Scan (also a button on the dashboard)
-python3 -m caraway status            # last successful scan, sources, blockers
-python3 -m caraway leads -n 20       # ranked candidate leads
-python3 -m caraway report            # markdown summary
-python3 -m caraway pause             # stop all automated work (resume with: resume)
-python3 -m caraway outcome 458 not_worth_pursuing --evidence "needs MD license"   # teach the ranker
-python3 -m caraway evaluate          # measure ranking vs verified outcomes
+python3 -m caraway scan                   # full cycle: discover, screen, research, brain, mail (launchd runs this every 4h)
+python3 -m caraway brain funnel           # opportunities at each stage, conversion, verified collected cash
+python3 -m caraway brain plan             # ranked next actions with expected value
+python3 -m caraway leads -n 20            # ranked candidate leads
+python3 -m caraway contractors list --category janitorial --state DE
+python3 -m caraway bid prepare 458        # bid package: pricing, cash flow, compliance checks
+python3 -m caraway quote add --opportunity 458 --contractor 3943 --amount 2400 --period month --evidence "call 11/25, Angie"
+python3 -m caraway outcome 458 lost --evidence "bid tab posted 1/10"
+python3 -m caraway mail status | drafts | approve 12 13 | enable | disable
+python3 -m caraway doctor                 # health: stale scans, failed jobs, launchd, disk, DB integrity
+python3 -m caraway pause | resume
 python3 -m unittest discover -s tests -v
 ```
 
 **Emergency stop:** `touch var/STOP` halts every scheduled run until the file is deleted.
+
+## The acquisition loop
+
+Every scan ends with an executive-brain cycle that moves opportunities toward revenue:
+
+```
+discovered -> qualified -> contractors_identified -> quote_requested -> quote_received
+           -> bid_ready -> submitted -> awarded -> collected
+```
+
+Stages are derived from evidence (a sent email, a stored quote, a compliant package, a verified
+award, verified cash), never from the system's own claims. The brain values each possible next
+action (probability it advances the lead x estimated profit if won x urgency), does the ones it
+may do alone (contractor research, RFQ drafts, follow-ups, bid packages) and turns the rest into
+specific owner tasks (call lists with phone numbers, sending authorization, blockers, submission).
+Every decision is logged; after 7 days it is scored as advanced / no progress, and once an action
+type has 10 scored decisions its measured rate replaces the prior.
+
+### Contractor research
+
+Official directories only, with every fact stored in `contractor_evidence`:
+NYC SBS certified businesses (phone, website, certifications, past jobs), Delaware Office of
+Supplier Diversity (email, phone), NY DEC registered pesticide businesses (license + expiry),
+LA City business tax registrations (NAICS, address), USAspending award recipients, Montgomery
+County contract holders. Email addresses exist only where the business registered one with a
+government directory; Caraway does not guess or scrape them. Opt-outs are permanent.
+
+### Email (Gmail) — off until you turn it on
+
+1. Google Cloud Console → create a project → enable the Gmail API → OAuth client type **Desktop app** → download `client_secret.json`.
+2. `python3 -m caraway mail connect --client-secret ~/Downloads/client_secret.json` (token goes to the macOS Keychain).
+3. `cp config/comms_policy.json config/comms_policy.local.json`, fill in the sender name, email,
+   phone and **business mailing address**, set `"enabled": true`.
+4. Review drafts (`mail drafts` or the Outreach tab). Either approve individual messages
+   (`mail approve ID`) or list kinds in `auto_send_kinds` (e.g. `["rfq","followup"]`) as a standing policy.
+5. `python3 -m caraway mail enable`.
+
+Every send also passes daily caps, quiet hours, opt-out and per-contractor limits. Replies are
+pulled from Gmail each cycle (or `mail import FOLDER` for exported .eml files), classified
+(quote, interested, question, declined, unsubscribe, bounce, out-of-office), and quotes are stored
+as unverified until you confirm them. Negotiation emails are drafted only if enabled in policy,
+never accept anything, and are always marked non-binding.
+
+### Bid packages
+
+`config/bid_policy.json` holds Caraway's pricing assumptions. Each package records: a market
+benchmark from comparable federal awards, the target subcontract cost, the lowest quote, bid
+price and margin, a day-level working-capital model (agency pays late, subcontractor paid sooner),
+and pass/fail/unknown checks with evidence (registration, insurance, set-aside, FAR 52.219-14
+limitation on subcontracting, participation goals, licenses, margin floor, working capital,
+bonding, solicitation review). Unknown is never a pass. Packages are written to `var/bids/`.
+
+`config/authority_policy.json` describes standing owner authorizations (e.g. auto-submit a
+small, low-risk bid). Caraway evaluates every package against it and shows which rule would
+apply. Bid submission itself stays blocked in code in this version.
+
+## Verify a Mac deployment
+
+```bash
+./scripts/install_macos.sh && ./scripts/verify_macos.sh
+```
+
+`verify_macos.sh` checks Python, runs the tests, confirms both launchd agents are loaded, triggers a
+real scan through launchd and waits for it to finish, kills the dashboard to confirm launchd restarts
+it, and runs `doctor`. Failed jobs, stale scans or unloaded agents raise a macOS notification and a
+P1 task, and are written to `var/health.json`.
+
+## Move to a private repository
+
+```bash
+caraway/scripts/migrate_to_private_repo.sh https://github.com/<you>/caraway.git
+```
+
+Create the empty private repo first. The script extracts only `caraway/` with its history
+(`git subtree split`) and pushes it as `main`; nothing else in revenueos-core is copied or changed.
+In the new repo, the project lives at the root (run commands there instead of in `caraway/`).
 
 ## Recovery
 
@@ -63,6 +143,8 @@ python3 -m unittest discover -s tests -v
 
 | Source | Kind | Key? | Status |
 |---|---|---|---|
+| Baton Rouge / East Baton Rouge Parish bid openings (`data.brla.gov u9zk-8nix`) | Open solicitations | No | Working |
+| Cook County IL buying plan, San Diego County forecast, NYC M/WBE upcoming, Montgomery County expiring contracts | Forecasts (never treated as bids) | No | Working |
 | NYC City Record Online (NYC Open Data `dg92-zbpx`) | Open solicitations | No | Working |
 | Los Angeles RAMP open bids (`data.lacity.org hf3r-utnq`) | Open solicitations | No | Working |
 | Montgomery County, MD solicitations (`eeq6-nnwe`) | Open solicitations | No | Working |
@@ -126,13 +208,17 @@ caraway/            package
   ranking.py        transparent scoring + outcome-tested learning
   executive.py      next actions, human tasks, subcontractor matching, RFQ drafts
   finance.py        bid math, typed money facts, cash-capacity check
-  comms.py          drafts only
+  contractors.py    contractor research engine (official directories, evidence, CRM)
+  mail/             templates, policy gate, Gmail/dry-run transports, OAuth, classifier, engine
+  bids.py           bid packages: benchmark, pricing, cash flow, compliance checks
+  brain.py          executive brain: funnel stages, next-best action, decisions, learning
+  health.py         doctor, failed-job reporting, macOS notifications
   llm.py            Ollama provider (optional), schema-validated output
   dashboard.py      local web UI
 config/             owner capability profile (all unverified by default)
 deploy/launchd/     plist templates
 scripts/            install / uninstall / scheduled-scan wrappers
-tests/              35 rule, safety, parsing and pipeline tests
+tests/              53 rule, safety, parsing, pipeline and end-to-end tests
 var/                database, logs (gitignored)
 ```
 

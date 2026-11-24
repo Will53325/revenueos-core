@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from . import comms, compliance, config, db
+from . import compliance, config, db
 
 PREREQS = [
     (lambda p: p["registrations"].get("sam_gov_active") != "verified", 1,
@@ -61,16 +61,7 @@ def plan(conn, profile: dict) -> dict:
         out["tasks"] += 1
         conn.execute("INSERT OR IGNORE INTO pursuits(opportunity_id,stage,updated_at) VALUES(?,?,?)",
                      (o["id"], "identified", db.now()))
-        # Subcontractor matching: firms with federal awards in the same category and state.
-        subs = db.q(conn, """SELECT * FROM contractors WHERE categories=? AND state=?
-                             ORDER BY federal_award_count DESC LIMIT 3""", (o["target_category"], o["state"]))
-        for c in subs:
-            comms.draft_rfq(conn, o, c)
-            out["drafts"] += 1
-        if not subs:
-            db.task(conn, f"Find subcontractors for lead #{o['id']}",
-                    f"No {o['target_category']} firms in {o['state']} in the contractor database yet. "
-                    "Search the state's licensing board and the SBA Dynamic Small Business Search.", "system", 3, o["id"])
+        # Contractor matching, RFQs, bid packages and follow-ups are decided by brain.cycle().
     # Close review tasks for leads that dropped out (expired, amended out of scope).
     conn.execute("""UPDATE tasks SET status='obsolete', updated_at=? WHERE status='open' AND opportunity_id IS NOT NULL
                     AND opportunity_id NOT IN (SELECT id FROM opportunities WHERE eligibility_status='candidate')""", (db.now(),))

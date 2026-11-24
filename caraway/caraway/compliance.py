@@ -67,3 +67,69 @@ def bid_readiness(opp: dict, profile: dict) -> dict:
         missing.append("eligibility screen not passed")
     missing.append("owner bid approval")  # always required
     return {"bid_authorized": False, "missing": missing}
+
+
+# ------------------------------------------------------------------ email sending
+
+def authorize_send(conn, policy: dict, kind: str, transport, sent_today: int, now=None, approved: bool = False) -> tuple:
+    """Standing-policy check for one outbound email. Returns (ok, reason). Logs denials once per reason."""
+    from datetime import datetime
+    if paused(conn):
+        return False, "system paused"
+    if db.control(conn, "email_sending_enabled") != "1":
+        return False, "owner has not enabled email sending (caraway mail enable)"
+    if not policy.get("enabled"):
+        return False, "comms policy disabled (config/comms_policy*.json enabled=false)"
+    if transport is None or not transport.configured():
+        return False, "no mail transport (Gmail not connected)"
+    if kind not in policy.get("allowed_kinds", []):
+        return False, f"message kind '{kind}' not allowed by policy"
+    if not approved and kind not in policy.get("auto_send_kinds", []):
+        return False, f"'{kind}' needs owner approval (approve the message, or add the kind to auto_send_kinds)"
+    if sent_today >= int(policy.get("daily_send_limit", 0)):
+        return False, "daily send limit reached"
+    qh = policy.get("quiet_hours_local")
+    hour = (now or datetime.now()).astimezone().hour
+    if qh and (hour >= qh[0] or hour < qh[1]):
+        return False, "quiet hours"
+    return True, "ok"
+
+
+# ------------------------------------------------------------------ standing authority (future binding actions)
+
+AUTHORITY_PATH = config.PROJECT_ROOT / "config" / "authority_policy.json"
+
+
+def evaluate_authority(action: str, ctx: dict) -> dict:
+    """Would a standing owner policy authorize this action? Used to show which bids could
+    eventually go out without a per-bid approval. Binding actions remain FORBIDDEN in code
+    regardless of the answer; enabling them is a deliberate future code change plus owner sign-off."""
+    import json as _json
+    try:
+        pol = _json.loads(AUTHORITY_PATH.read_text())
+    except (OSError, ValueError):
+        return {"authorized": False, "rule": None, "unmet": ["no authority policy file"]}
+    best = {"authorized": False, "rule": None, "unmet": ["no rule for this action"]}
+    for rule in pol.get("rules", []):
+        if rule.get("action") != action:
+            continue
+        unmet = []
+        if not rule.get("enabled"):
+            unmet.append("rule disabled by owner")
+        for key, limit in (rule.get("max") or {}).items():
+            v = ctx.get(key)
+            if v is None or v > limit:
+                unmet.append(f"{key}={v} exceeds {limit}")
+        for key, limit in (rule.get("min") or {}).items():
+            v = ctx.get(key)
+            if v is None or v < limit:
+                unmet.append(f"{key}={v} below {limit}")
+        for key in rule.get("require_true", []):
+            if not ctx.get(key):
+                unmet.append(f"{key} not satisfied")
+        if action in FORBIDDEN:
+            unmet.append("automated execution not implemented: submission stays with the owner")
+        res = {"authorized": not unmet, "rule": rule.get("id"), "unmet": unmet}
+        if not best["rule"] or len(unmet) < len(best["unmet"]):
+            best = res
+    return best

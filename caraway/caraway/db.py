@@ -197,9 +197,80 @@ def connect(path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
+SCHEMA_V2 = """
+-- Forecasts and planned procurements. Never active bids.
+CREATE TABLE IF NOT EXISTS forecast_opportunities (
+  id INTEGER PRIMARY KEY, dedupe_key TEXT UNIQUE, source TEXT, title TEXT, agency TEXT,
+  jurisdiction TEXT, state TEXT, anticipated_date TEXT, estimated_value_text TEXT,
+  target_category TEXT, small_business_fit TEXT, source_url TEXT, raw_json TEXT,
+  first_seen_at TEXT, last_seen_at TEXT
+);
+-- Contractor evidence: every fact about a contractor with where it came from.
+CREATE TABLE IF NOT EXISTS contractor_evidence (
+  id INTEGER PRIMARY KEY, contractor_id INTEGER, fact TEXT, value TEXT, source TEXT,
+  source_url TEXT, verified_at TEXT, UNIQUE(contractor_id, fact, source)
+);
+CREATE TABLE IF NOT EXISTS opt_outs (
+  address TEXT PRIMARY KEY, reason TEXT, created_at TEXT
+);
+-- Conversation memory.
+CREATE TABLE IF NOT EXISTS threads (
+  id INTEGER PRIMARY KEY, opportunity_id INTEGER, contractor_id INTEGER, kind TEXT,
+  status TEXT DEFAULT 'drafted', subject TEXT, gmail_thread_id TEXT, last_activity_at TEXT,
+  next_followup_at TEXT, followups_sent INTEGER DEFAULT 0, created_at TEXT,
+  UNIQUE(opportunity_id, contractor_id, kind)
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY, thread_id INTEGER, direction TEXT, status TEXT, to_address TEXT,
+  from_address TEXT, subject TEXT, body_text TEXT, body_html TEXT, message_id TEXT UNIQUE,
+  in_reply_to TEXT, classification TEXT, classification_detail TEXT, extracted_json TEXT,
+  sent_at TEXT, received_at TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS bid_packages (
+  id INTEGER PRIMARY KEY, opportunity_id INTEGER, version INTEGER, status TEXT,
+  compliant INTEGER, checks_json TEXT, pricing_json TEXT, cashflow_json TEXT,
+  policy_json TEXT, document_path TEXT, created_at TEXT, UNIQUE(opportunity_id, version)
+);
+-- Executive brain: every chosen action with its predicted value and later outcome.
+CREATE TABLE IF NOT EXISTS decisions (
+  id INTEGER PRIMARY KEY, opportunity_id INTEGER, action TEXT, stage_before TEXT,
+  expected_value REAL, rationale TEXT, status TEXT DEFAULT 'chosen', executed_by TEXT,
+  result TEXT, stage_after TEXT, created_at TEXT, evaluated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS funnel_snapshots (
+  id INTEGER PRIMARY KEY, taken_at TEXT, counts_json TEXT
+);
+"""
+
+CONTRACTOR_COLUMNS = {
+    "email": "TEXT", "phone": "TEXT", "website": "TEXT", "address": "TEXT", "zip": "TEXT",
+    "naics": "TEXT", "certifications": "TEXT", "license_number": "TEXT", "license_status": "TEXT",
+    "license_expires": "TEXT", "contact_name": "TEXT", "contact_source": "TEXT",
+    "description": "TEXT", "fit_score": "REAL", "do_not_contact": "INTEGER DEFAULT 0",
+    "name_key": "TEXT",
+}
+OPPORTUNITY_COLUMNS = {"funnel_stage": "TEXT", "funnel_updated_at": "TEXT"}
+QUOTE_COLUMNS = {"message_id": "INTEGER", "basis": "TEXT", "verified": "INTEGER DEFAULT 0"}
+MESSAGE_COLUMNS = {"approved_by_owner": "INTEGER DEFAULT 0"}
+
+
+def _add_columns(conn, table: str, cols: dict) -> None:
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for name, typ in cols.items():
+        if name not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
+
+
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    conn.executescript(SCHEMA_V2)
+    _add_columns(conn, "contractors", CONTRACTOR_COLUMNS)
+    _add_columns(conn, "opportunities", OPPORTUNITY_COLUMNS)
+    _add_columns(conn, "quotes", QUOTE_COLUMNS)
+    _add_columns(conn, "messages", MESSAGE_COLUMNS)
+    conn.execute("CREATE INDEX IF NOT EXISTS contractors_key ON contractors(name_key, state)")
     conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version',?)", (str(SCHEMA_VERSION),))
+    conn.execute("UPDATE meta SET value='2' WHERE key='schema_version' AND value<'2'")
     conn.execute("INSERT OR IGNORE INTO controls(key,value,updated_at) VALUES('paused','0',?)", (now(),))
     conn.execute("INSERT OR IGNORE INTO controls(key,value,updated_at) VALUES('email_sending_enabled','0',?)", (now(),))
 

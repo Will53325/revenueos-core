@@ -37,6 +37,12 @@ ALLOWED_HOSTS = {
     "data.lacity.org": 1.0,
     "data.montgomerycountymd.gov": 1.0,
     "data.delaware.gov": 1.0,
+    "data.ny.gov": 1.0,
+    "data.brla.gov": 1.0,
+    "datacatalog.cookcountyil.gov": 1.0,
+    "internal-sandiegocounty.data.socrata.com": 1.0,
+    "gmail.googleapis.com": 1.0,       # only used once the owner authorizes Gmail
+    "oauth2.googleapis.com": 1.0,
     "127.0.0.1": 0.0,                 # local Ollama only
     "localhost": 0.0,
 }

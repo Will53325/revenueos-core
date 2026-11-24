@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import config, db, eligibility, finance, report, scanner
 
 TOKEN = secrets.token_urlsafe(16)
-TABS = [("overview", "Status"), ("leads", "Leads"), ("all", "All notices"), ("forecasts", "Recompetes"),
+TABS = [("overview", "Status"), ("funnel", "Funnel"), ("leads", "Leads"), ("bids", "Bids"), ("outreach", "Outreach"), ("all", "All notices"), ("forecasts", "Recompetes"),
         ("contractors", "Contractors"), ("pipeline", "Pipeline"), ("tasks", "Your tasks"),
         ("drafts", "Drafts"), ("finance", "Finance"), ("logs", "Logs")]
 STAGES = ["identified", "researching", "contacting_subs", "pricing", "ready_for_owner", "submitted_by_owner", "won", "lost", "dropped"]
@@ -121,6 +121,55 @@ def render(tab: str, params: dict) -> str:
               <p class="muted"><small>Counts are records from official public sources. Nothing here is revenue, an award, or a win.</small></p>
               <h2>Sources</h2><div class="tw"><table><tr><th>Source</th><th>Status</th><th>Last success</th><th>Records</th><th>Error</th></tr>{srows}</table></div>
               <h2>Blocked integrations</h2><ul>{blk or '<li>None</li>'}</ul>""")
+        if tab == "funnel":
+            from . import brain
+            fr = brain.funnel_report(conn)
+            rows = "".join(f"<tr><td>{e(st)}</td><td><b>{fr['reached'][st]}</b></td><td>{fr['at_stage'][st]}</td></tr>" for st in brain.STAGES)
+            conv = "".join(f"<li>{e(k)}: {'n/a' if v is None else f'{v * 100:.0f}%'}</li>" for k, v in fr["conversion"].items())
+            acts = brain.plan(conn, 15)
+            arows = "".join(f"<tr><td>{a['expected_value']:,.0f}</td><td>{e(a['action'])}<br><small class='muted'>{'Caraway' if a['action'] in brain.AUTONOMOUS else 'You'}</small></td>"
+                            f"<td>#{a['opportunity_id']} {e(a['title'][:70])}<br><small class='muted'>{e(a['why'])} · p={a['p']} ({a['p_source']}) · value: {e(a['value_basis'])}</small></td></tr>" for a in acts)
+            learn = fr["decision_learning"]
+            dec = db.q(conn, "SELECT status, COUNT(*) n FROM decisions GROUP BY status")
+            return page(tab, f"""<h1>Pipeline to revenue</h1>
+              <p class='muted'><small>Counts are opportunities, from recorded evidence. "Reached" means got at least that far. Collected cash counts only verified actuals.</small></p>
+              <div class='grid'><div class='card kpi'><span class='label'>Verified collected cash</span><b>${fr['collected_cash_verified']:,.0f}</b></div>
+              <div class='card kpi'><span class='label'>Quotes received</span><b>{fr['reached']['quote_received']}</b></div>
+              <div class='card kpi'><span class='label'>Compliant bids</span><b>{fr['reached']['bid_ready']}</b></div>
+              <div class='card kpi'><span class='label'>Awards</span><b>{fr['reached']['awarded']}</b></div></div>
+              <div class='tw'><table><tr><th>Stage</th><th>Reached</th><th>Currently here</th></tr>{rows}</table></div>
+              <h2>Conversion</h2><ul>{conv}</ul>
+              <h2>Next best actions</h2><p class='muted'><small>Value = probability the action advances the lead × estimated profit if won × urgency, spread over the stages left. Estimates, not revenue.</small></p>
+              <div class='tw'><table><tr><th>Value</th><th>Action / who</th><th>Opportunity</th></tr>{arows or '<tr><td colspan=3>No open candidates.</td></tr>'}</table></div>
+              <h2>Decision record</h2><p>{', '.join(f"{e(d['status'])}: {d['n']}" for d in dec) or 'none'} · measured action rates: {e(learn) if learn else 'not enough evaluated decisions yet (need 10 per action)'}</p>""")
+        if tab == "bids":
+            rows = db.q(conn, """SELECT b.*, o.title, o.due_at FROM bid_packages b JOIN opportunities o ON o.id=b.opportunity_id
+                                 WHERE b.version=(SELECT MAX(version) FROM bid_packages x WHERE x.opportunity_id=b.opportunity_id) ORDER BY o.due_at""")
+            cards = ""
+            for b in rows:
+                checks, pr = json.loads(b["checks_json"]), json.loads(b["pricing_json"])
+                bench = pr.get("benchmark", {})
+                lis = "".join(f"<li><span class='{ {'pass': 'ok', 'fail': 'bad'}.get(c['status'], 'warn')}'>{e(c['status'].upper())}</span> {e(c['check'])}: <small>{e(c['evidence'])}{(' → ' + e(c['fix'])) if c['status'] != 'pass' and c['fix'] else ''}</small></li>" for c in checks)
+                price = (f"Bid ${pr['bid_price']:,.0f}/yr · margin {pr['gross_margin_pct']}% · sub {e(pr.get('subcontractor'))}" if pr.get("bid_price")
+                         else f"No quote yet. Target subcontract cost: {('$' + format(pr['target_subcontract_cost'], ',.0f') + '/yr') if pr.get('target_subcontract_cost') else 'n/a'}")
+                cards += (f"<div class='card'><b>#{b['opportunity_id']} {e(b['title'])}</b><br><span class='pill'>{e(b['status'])}</span><span class='pill'>v{b['version']}</span> "
+                          f"{dl_text(eligibility.days_left(b['due_at']))}<div><small>{price}</small></div>"
+                          f"<div><small class='muted'>Benchmark: {e(bench.get('basis'))}{(' · median $' + format(bench['median_annual'], ',.0f') + '/yr') if bench.get('median_annual') else ''}</small></div>"
+                          f"<details><summary>Checks ({sum(c['status'] == 'pass' for c in checks)}/{len(checks)} pass)</summary><ul>{lis}</ul></details></div>")
+            return page(tab, f"<h1>Bid packages</h1><p class='muted'><small>Compliant only when every check passes. Unknown is not a pass. Submission is always yours.</small></p>{cards or '<p>No packages yet.</p>'}")
+        if tab == "outreach":
+            ths = db.q(conn, """SELECT t.*, c.name, c.email, c.phone, o.title FROM threads t JOIN contractors c ON c.id=t.contractor_id
+                                JOIN opportunities o ON o.id=t.opportunity_id ORDER BY t.last_activity_at DESC LIMIT 100""")
+            cards = ""
+            for t in ths:
+                msgs = db.q(conn, "SELECT * FROM messages WHERE thread_id=? ORDER BY id", (t["id"],))
+                ml = "".join(f"<details><summary>{e(m['direction'])} · {e(m['classification'])} · {e(m['status'])}{(' — ' + e(m['classification_detail'])) if m['classification_detail'] else ''}</summary><pre>{e(m['body_text'])}</pre></details>" for m in msgs)
+                cards += f"<div class='card'><b>{e(t['name'])}</b> <small>{e(t['email'])} · {e(t['phone'])}</small><br><small>#{t['opportunity_id']} {e(t['title'][:80])}</small><br><span class='pill'>{e(t['status'])}</span>{ml}</div>"
+            from .mail import engine as mail_engine, transport as mail_tr
+            pol = mail_engine.load_policy()
+            gate = (f"Owner enabled: {'yes' if db.control(conn, 'email_sending_enabled') == '1' else 'no'} · policy enabled: {'yes' if pol.get('enabled') else 'no'} · "
+                    f"Gmail connected: {'yes' if mail_tr.GmailTransport().configured() else 'no'}")
+            return page(tab, f"<h1>Outreach</h1><div class='card'><small>{gate}. Nothing is sent unless all three are yes and the message kind is approved.</small></div>{cards or '<p>No conversations yet.</p>'}")
         if tab == "leads":
             rows = report.leads(conn, 50)
             return page(tab, "<h1>Ranked actionable leads</h1><p class='muted'><small>INVESTIGATE means the notice fits Caraway's model and nothing disqualifying was found in its text. It is not permission to bid: every lead still has blockers to verify.</small></p>"
@@ -138,12 +187,17 @@ def render(tab: str, params: dict) -> str:
             rows = db.q(conn, "SELECT * FROM recompete_forecasts ORDER BY fit_score DESC, end_date LIMIT 300")
             trs = "".join(f"<tr><td>{e(r['end_date'])}</td><td>{link(r['url'], r['description'][:120] or r['award_id'])}<br><small class='muted'>{e(r['sub_agency'])} · {e(r['state'])}</small></td>"
                           f"<td>{e(r['target_category'])}</td><td>${(r['amount'] or 0):,.0f}</td><td>{e(r['recipient'])}</td></tr>" for r in rows)
-            return page(tab, f"<h1>Federal contracts ending soon ({len(rows)})</h1><p class='muted'><small>From USAspending.gov. These are <b>forecasts</b>: the current contract ends and the work is often re-solicited on SAM.gov. Amount is the incumbent's total obligated value, not Caraway revenue.</small></p><div class='tw'><table><tr><th>Ends</th><th>Award</th><th>Category</th><th>Obligated</th><th>Incumbent</th></tr>{trs}</table></div>")
+            fc = db.q(conn, "SELECT * FROM forecast_opportunities ORDER BY anticipated_date LIMIT 200")
+            frows = "".join(f"<tr><td>{e(r['anticipated_date'])}</td><td>{link(r['source_url'], r['title'][:140])}<br><small class='muted'>{e(r['agency'])} · {e(r['state'])}</small></td>"
+                            f"<td>{e(r['target_category'])}</td><td><small>{e(r['small_business_fit'] or r['estimated_value_text'] or '')}</small></td></tr>" for r in fc)
+            body_local = f"<h1>Local forecasts and expiring contracts ({len(fc)})</h1><p class='muted'><small>Planned buys and contracts nearing the end of their term. Not open solicitations.</small></p><div class='tw'><table><tr><th>When</th><th>What</th><th>Category</th><th>Notes</th></tr>{frows}</table></div>"
+            return page(tab, body_local + f"<h1>Federal contracts ending soon ({len(rows)})</h1><p class='muted'><small>From USAspending.gov. These are <b>forecasts</b>: the current contract ends and the work is often re-solicited on SAM.gov. Amount is the incumbent's total obligated value, not Caraway revenue.</small></p><div class='tw'><table><tr><th>Ends</th><th>Award</th><th>Category</th><th>Obligated</th><th>Incumbent</th></tr>{trs}</table></div>")
         if tab == "contractors":
-            rows = db.q(conn, "SELECT * FROM contractors ORDER BY federal_award_count DESC, federal_award_total DESC LIMIT 400")
-            trs = "".join(f"<tr><td>{e(r['name'])}<br><small class='muted'>UEI {e(r['uei'])}</small></td><td>{e(r['state'])}</td><td>{e(r['categories'])}</td>"
-                          f"<td>{e(r['federal_award_count'])} / ${(r['federal_award_total'] or 0):,.0f}</td><td>{link(r['source_url'], 'evidence')}</td><td>{e(r['relationship_stage'])}</td></tr>" for r in rows)
-            return page(tab, f"<h1>Contractor database ({len(rows)})</h1><p class='muted'><small>Firms with federal awards under $1M in Caraway's categories (USAspending). Licenses and contact details are unverified until researched.</small></p><div class='tw'><table><tr><th>Firm</th><th>State</th><th>Category</th><th>Awards / total</th><th>Source</th><th>Stage</th></tr>{trs}</table></div>")
+            rows = db.q(conn, "SELECT * FROM contractors ORDER BY fit_score DESC, federal_award_count DESC LIMIT 400")
+            total = db.one(conn, "SELECT COUNT(*) n, SUM(email IS NOT NULL) e, SUM(phone IS NOT NULL) p FROM contractors")
+            trs = "".join(f"<tr><td>{e(r['name'])}<br><small class='muted'>{e(r['certifications'] or '')} {e(r['license_number'] or '')}</small></td><td>{e(r['state'])}</td><td>{e(r['categories'])}</td>"
+                          f"<td><small>{e(r['email'] or '')}<br>{e(r['phone'] or '')}</small></td><td>{(r['fit_score'] or 0):.0f}</td><td>{link(r['source_url'], r['source'])}</td><td>{e(r['relationship_stage'])}</td></tr>" for r in rows)
+            return page(tab, f"<h1>Contractor CRM ({total['n']}; {total['e']} with email, {total['p']} with phone)</h1><p class='muted'><small>From official directories: NYC SBS certified businesses, Delaware Office of Supplier Diversity, NY DEC pesticide registrations, LA business tax registrations, federal award recipients, county contract holders. Contact details are exactly as the business registered them. Top 400 by fit shown.</small></p><div class='tw'><table><tr><th>Firm</th><th>State</th><th>Category</th><th>Contact</th><th>Fit</th><th>Source</th><th>Stage</th></tr>{trs}</table></div>")
         if tab == "pipeline":
             rows = db.q(conn, """SELECT p.stage, p.updated_at, o.id, o.title, o.due_at, o.source_url FROM pursuits p JOIN opportunities o ON o.id=p.opportunity_id
                                  ORDER BY p.stage, o.due_at""")

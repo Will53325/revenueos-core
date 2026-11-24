@@ -47,12 +47,11 @@ def _throttle(host: str) -> None:
 
 
 def request(url: str, *, method: str = "GET", body: Any = None, headers: Optional[dict] = None,
-            timeout: float = 45, retries: int = 3) -> bytes:
+            timeout: float = 45, retries: int = 3, data: Optional[bytes] = None) -> bytes:
     host = _check_host(url)
     hdrs = {"User-Agent": config.USER_AGENT, "Accept": "application/json"}
     if headers:
         hdrs.update(headers)
-    data = None
     if body is not None:
         data = json.dumps(body).encode()
         hdrs["Content-Type"] = "application/json"

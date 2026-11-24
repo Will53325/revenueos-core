@@ -77,6 +77,25 @@ DATASETS = {
             source_url=_url(r.get("bidurl")), selection_method=None, scope_text="",
             documents=[{"name": "Delaware Bids & Contracts page", "url": _url(r.get("bidurl")), "access": "public_page"}]),
     },
+    "baton_rouge": {
+        "description": "City of Baton Rouge / East Baton Rouge Parish bid openings (data.brla.gov u9zk-8nix)",
+        "endpoint": "https://data.brla.gov/resource/u9zk-8nix.json",
+        # Only upcoming openings with no results posted: past openings are results, not bids.
+        "where": "bid_date >= '{today}' AND bid_results IS NULL",
+        "order": "bid_date ASC",
+        "jurisdiction": "East Baton Rouge Parish, LA", "state": "LA", "level": "municipal",
+        "map": lambda r: dict(
+            source_record_id=r.get("unique_id"), title=r.get("description"),
+            solicitation_number=clean_solnum(r.get("unique_id")),
+            agency_name=f"Baton Rouge {r.get('department_name') or ''}".strip(), published_at=None,
+            due_at=_due_date_only(r.get("bid_date")), due_at_raw=f"{(r.get('bid_date') or '')[:10]} {r.get('bid_time') or ''}".strip(),
+            notice_type="Bid opening", category=r.get("division_name"),
+            source_url=f"https://data.brla.gov/resource/u9zk-8nix.json?unique_id={r.get('unique_id')}",
+            selection_method="Sealed bid / RFP", scope_text=r.get("note") or "",
+            contact={"buyer": r.get("buyer_name"), "contact": r.get("contact_name"), "phone": r.get("phone")},
+            documents=[{"name": "East Baton Rouge Parish Purchasing (Central Auction House portal)",
+                        "url": "https://www.centralauctionhouse.com/rfpc10656-city-of-baton-rouge.html", "access": "public_page"}]),
+    },
 }
 
 
@@ -92,7 +111,7 @@ class Source:
         while True:
             params = {"$limit": 1000, "$offset": offset, "$order": cfg["order"]}
             if cfg["where"]:
-                params["$where"] = cfg["where"]
+                params["$where"] = cfg["where"].replace("{today}", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
             rows = net.get_json(cfg["endpoint"], params)
             for r in rows:
                 m = cfg["map"](r)

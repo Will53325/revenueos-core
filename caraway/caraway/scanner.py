@@ -193,6 +193,14 @@ def _run_job(conn, job: dict, profile: dict, stats: dict) -> None:
         stats["llm_summaries"] = summarize_top(conn, llm.get_provider())
     elif kind == "plan":
         stats["plan"] = executive.plan(conn, profile)
+    elif kind == "contractors":
+        from . import contractors as crm
+        stats["contractors"] = crm.research(conn)
+    elif kind == "brain":
+        from . import brain
+        from .mail import engine as mail
+        stats["brain"] = brain.cycle(conn, profile)
+        stats["mail"] = {"followups": mail.schedule_followups(conn), "dispatch": mail.dispatch(conn), "inbound": mail.poll_gmail(conn)}
     else:
         raise ValueError(f"unknown job kind {kind}")
 
@@ -267,6 +275,9 @@ def run_scan(trigger: str = "manual", conn=None, sources: Optional[list] = None,
                     enqueue(conn, "intel", {"name": name}, run_id, max_attempts=2)
         enqueue(conn, "assess", {}, run_id, max_attempts=1)
         enqueue(conn, "plan", {}, run_id, max_attempts=1)
+        if intel:
+            enqueue(conn, "contractors", {}, run_id, max_attempts=2)
+        enqueue(conn, "brain", {}, run_id, max_attempts=1)
         process_queue(conn, profile, stats)
         failed = stats.get("failed_jobs")
         got_any = any(v.get("fetched") for v in stats.get("sources", {}).values())
@@ -277,6 +288,11 @@ def run_scan(trigger: str = "manual", conn=None, sources: Optional[list] = None,
                      (db.now(), status, db.dumps(stats), run_id))
         db.audit(conn, "executive", "scan", trigger, status, db.dumps(stats)[:1500])
         stats["status"], stats["scan_run_id"] = status, run_id
+        try:
+            from . import health
+            stats["health_ok"] = health.check(conn)["ok"]
+        except Exception as e:  # noqa: BLE001 - health reporting must never break a scan
+            db.log_error(conn, "health", str(e))
         return stats
     finally:
         fcntl.flock(lock_fh, fcntl.LOCK_UN)

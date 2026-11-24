@@ -1,0 +1,26 @@
+{
+  "_comment": "Standing communications policy. Caraway sends NOTHING unless enabled=true here AND the owner turns on email_sending_enabled AND a Gmail account is authorized. Fill sender details with real business information only.",
+  "enabled": false,
+  "sender": {
+    "name": null,
+    "title": "Owner",
+    "company": "Caraway Housing LLC",
+    "email": null,
+    "phone": null,
+    "physical_address": null,
+    "website": null
+  },
+  "allowed_kinds": ["rfq", "followup", "negotiation", "thanks", "decline"],
+  "auto_send_kinds": [],
+  "daily_send_limit": 20,
+  "per_contractor_max_messages": 4,
+  "followup_days": [3, 7],
+  "max_followups": 2,
+  "quiet_hours_local": [19, 8],
+  "require_contact_source_official": true,
+  "negotiation": {
+    "enabled": false,
+    "max_rounds": 1,
+    "ask_for_best_price_when_above_target_pct": 10
+  }
+}

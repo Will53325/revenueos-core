@@ -1,0 +1,10 @@
+{
+  "_comment": "Pricing assumptions used by the bid engine. These are Caraway's own policy choices, not facts about any solicitation. Government payment days are conservative defaults; federal invoices are generally due in 30 days under the Prompt Payment Act.",
+  "overhead_pct": 0.10,
+  "contingency_pct": 0.05,
+  "target_margin_pct": 0.15,
+  "min_margin_pct": 0.10,
+  "contract_months": 12,
+  "subcontractor_payment_days": 30,
+  "government_payment_days": {"federal": 30, "state": 45, "county": 45, "municipal": 45, "default": 45}
+}

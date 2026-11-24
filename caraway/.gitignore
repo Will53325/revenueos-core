@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .env
 config/owner_profile.local.json
+config/comms_policy.local.json
+config/*.local.json
+client_secret*.json

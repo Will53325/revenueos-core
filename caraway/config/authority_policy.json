@@ -1,0 +1,21 @@
+{
+  "_comment": "Standing owner authorizations. A rule describes conditions under which Caraway may act without a per-item approval. Every rule ships disabled. Binding actions (submit_bid) are additionally blocked in code until a deliberate future release; this file shows what WOULD qualify.",
+  "rules": [
+    {
+      "id": "auto-submit-small-low-risk-bid",
+      "action": "submit_bid",
+      "enabled": false,
+      "max": {"bid_price": 25000, "upfront_cash_required": 2000, "days_to_payment": 45},
+      "min": {"gross_margin_pct": 15, "days_to_deadline": 2},
+      "require_true": ["all_checks_pass", "quote_in_hand", "no_certification_attestation", "electronic_submission",
+                       "registrations_verified", "insurance_verified", "owner_reviewed_template"]
+    },
+    {
+      "id": "auto-request-quotes",
+      "action": "request_quote",
+      "enabled": false,
+      "max": {"messages_per_opportunity": 5},
+      "require_true": ["opportunity_is_candidate", "contact_from_official_directory"]
+    }
+  ]
+}
